@@ -1,9 +1,25 @@
 // THE WORLD ON TUESDAY 17 NOVEMBER 2026 — one image that sums up the day's world news.
 //
-// A make.fun "news-image-20261117" entry. This program draws the whole front page itself:
-// a tiny software rasteriser, a hand-built stroke font, flat-colour scenes for each story,
-// and a PNG encoder on top of node:zlib. Node standard library only, no network, no clock,
-// no randomness — every run writes exactly the same bytes to /output/entry.png.
+// A make.fun "news-image-20261117" entry, v2: a full broadsheet front page. This program
+// draws the whole page itself: a tiny software rasteriser, a hand-built stroke font,
+// flat-colour scenes for the lead stories, and a PNG encoder on top of node:zlib.
+// Node standard library only, no network, no clock, no randomness — every run writes
+// exactly the same bytes to /output/entry.png.
+//
+// The day's stories, as reported on 17 November 2026 (Reuters, AP, BBC, CNN, the New
+// York Times, Forbes, CDC/NEJM Evidence, OHCHR, UKMTO and the wires):
+//   LEAD  Ukraine brings down a road span of the Crimea (Kerch) Bridge in a seven-stage
+//         operation; Russia halts all traffic and strikes Kyiv's bridges in reply.
+//   GULF  A fourth tanker hits a naval mine in the Strait of Hormuz, Iran's navy says;
+//         UKMTO reports a projectile strike off Oman; a third US carrier is in the Gulf.
+//   TECH  Nvidia's first earnings since Jensen Huang resigned beat forecasts — revenue
+//         $115.8bn against $109.1bn expected — and the board will not reinstate him.
+//   ASIA  Trump lands in Manila for the ASEAN-US special summit and the first Quad
+//         leaders' meeting in two years; the Philippines hands the chair to Singapore.
+//   PLUS  Knesset ousts Netanyahu ally Ohana as speaker (Kahana wins 66-52); 128 states
+//         open "killer robot" talks in Geneva; US measles at 5,412 cases, the highest
+//         since 1991; Andreeva wins the WTA Finals on debut; closing market prices;
+//         Cyclone Akvan in the Bay of Bengal; and a ticker of the rest of the day.
 //
 // Run locally with:  mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 
@@ -330,6 +346,18 @@ function drawTextCentered(
   drawText(str, cx - w / 2, y, cap, col, opts);
 }
 
+function drawTextRight(
+  str: string,
+  xr: number,
+  y: number,
+  cap: number,
+  col: RGB,
+  opts: TextOpts = {},
+): void {
+  const w = textWidth(str, cap, opts.tracking ?? DEFAULT_TRACKING);
+  drawText(str, xr - w, y, cap, col, opts);
+}
+
 // Draw centred text, shrinking the cap height until it fits maxW.
 function drawTextFit(
   str: string,
@@ -343,6 +371,53 @@ function drawTextFit(
   const w = textWidth(str, cap, opts.tracking ?? DEFAULT_TRACKING);
   const useCap = w > maxW ? (cap * maxW) / w : cap;
   drawTextCentered(str, cx, y, useCap, col, opts);
+}
+
+// Left-aligned text that shrinks its cap height until it fits maxW.
+function drawTextFitLeft(
+  str: string,
+  x: number,
+  y: number,
+  cap: number,
+  maxW: number,
+  col: RGB,
+  opts: TextOpts = {},
+): void {
+  const w = textWidth(str, cap, opts.tracking ?? DEFAULT_TRACKING);
+  const useCap = w > maxW ? (cap * maxW) / w : cap;
+  drawText(str, x, y, useCap, col, opts);
+}
+
+// Greedy word wrap on the stroke font's own metrics.
+function wrapText(str: string, cap: number, maxW: number, tracking: number = DEFAULT_TRACKING): string[] {
+  const words = str.split(' ');
+  const lines: string[] = [];
+  let line = '';
+  for (const word of words) {
+    const trial = line === '' ? word : line + ' ' + word;
+    if (line !== '' && textWidth(trial, cap, tracking) > maxW) {
+      lines.push(line);
+      line = word;
+    } else line = trial;
+  }
+  if (line !== '') lines.push(line);
+  return lines;
+}
+
+// A wrapped paragraph of body copy; returns the y just past its last line.
+function drawParagraph(
+  str: string,
+  x: number,
+  y: number,
+  cap: number,
+  maxW: number,
+  lineStep: number,
+  col: RGB,
+  opts: TextOpts = {},
+): number {
+  const lines = wrapText(str, cap, maxW, opts.tracking ?? DEFAULT_TRACKING);
+  for (let i = 0; i < lines.length; i++) drawText(lines[i], x, y + i * lineStep, cap, col, opts);
+  return y + lines.length * lineStep;
 }
 
 // ---------------------------------------------------------------------------
@@ -362,24 +437,12 @@ const DARKSTEEL: RGB = [64, 68, 76];
 const MEDAL: RGB = [233, 226, 208];
 const WHITEISH: RGB = [243, 244, 240];
 const FAINT: RGB = [120, 116, 104];
+const UP: RGB = [110, 196, 120]; // gains, on the dark markets band
+const DOWN: RGB = [238, 128, 116]; // losses, on the dark markets band
+const BANDTXT: RGB = [214, 208, 192]; // dim text on dark bands
 
 function rule(x1: number, x2: number, y: number, w: number, col: RGB): void {
   fillRect(x1, y - w / 2, x2 - x1, w, col);
-}
-
-// Left-aligned text that shrinks its cap height until it fits maxW.
-function drawTextFitLeft(
-  str: string,
-  x: number,
-  y: number,
-  cap: number,
-  maxW: number,
-  col: RGB,
-  opts: TextOpts = {},
-): void {
-  const w = textWidth(str, cap, opts.tracking ?? DEFAULT_TRACKING);
-  const useCap = w > maxW ? (cap * maxW) / w : cap;
-  drawText(str, x, y, useCap, col, opts);
 }
 
 function star(cx: number, cy: number, rOuter: number, rInner: number, n: number, col: RGB): void {
@@ -396,169 +459,208 @@ function star(cx: number, cy: number, rOuter: number, rInner: number, n: number,
 // Scenes. Every picture is flat shapes in the palette: no photos, no assets.
 // ---------------------------------------------------------------------------
 
-// The lead scene: the Kerch bridge to Crimea with one road span down.
+// The lead scene: the Kerch bridge to Crimea with one road span down, the
+// rail span beside it still standing, a missile trail arcing in.
 function drawBridgeScene(x: number, y: number, w: number, h: number): void {
   fillRect(x, y, w, h, SKY); // sky
-  fillEllipse(x + w * 0.16, y + h * 0.2, 44, 10, WHITEISH); // clouds
-  fillEllipse(x + w * 0.85, y + h * 0.16, 52, 11, WHITEISH);
-  const deckY = y + h * 0.52;
+  fillEllipse(x + w * 0.14, y + h * 0.18, 46, 9, WHITEISH); // clouds
+  fillEllipse(x + w * 0.86, y + h * 0.14, 54, 10, WHITEISH);
+  fillEllipse(x + w * 0.62, y + h * 0.26, 34, 7, WHITEISH);
+  const deckY = y + h * 0.5;
   const seaY = y + h * 0.68;
   fillRect(x, seaY, w, y + h - seaY, SEA); // water
-  // standing decks, left and right of the gap
-  fillRect(x, deckY, w * 0.4, 9, STEEL);
-  fillRect(x + w * 0.6, deckY, w * 0.4, 9, STEEL);
+  // the rail span behind, unbroken, with its arch
+  fillRect(x, deckY - 16, w, 4, DARKSTEEL);
+  thickLine(x + w * 0.36, deckY - 16, x + w * 0.5, deckY - 38, 3.4, DARKSTEEL);
+  thickLine(x + w * 0.5, deckY - 38, x + w * 0.64, deckY - 16, 3.4, DARKSTEEL);
+  for (const fx of [0.42, 0.5, 0.58]) thickLine(x + w * fx, deckY - 30 + Math.abs(fx - 0.5) * 44, x + w * fx, deckY - 16, 2, DARKSTEEL);
+  // standing road decks, left and right of the gap
+  fillRect(x, deckY, w * 0.4, 8, STEEL);
+  fillRect(x + w * 0.6, deckY, w * 0.4, 8, STEEL);
+  // the road arch over the left deck, broken off at the gap
+  thickLine(x + w * 0.1, deckY, x + w * 0.24, deckY - 26, 3.4, STEEL);
+  thickLine(x + w * 0.24, deckY - 26, x + w * 0.38, deckY - 4, 3.4, STEEL);
   // piers down into the water
-  for (const fx of [0.08, 0.2, 0.32, 0.68, 0.8, 0.92])
-    fillRect(x + w * fx, deckY + 9, 7, seaY - deckY + 6, DARKSTEEL);
-  // the fallen span, tilted into the sea
+  for (const fx of [0.07, 0.18, 0.29, 0.7, 0.81, 0.92])
+    fillRect(x + w * fx, deckY + 8, 6, seaY - deckY + 5, DARKSTEEL);
+  // the fallen span and its arch, tilted into the sea
   fillPoly(
     [
-      [x + w * 0.44, deckY + 6],
-      [x + w * 0.575, deckY + 34],
-      [x + w * 0.565, deckY + 48],
-      [x + w * 0.435, deckY + 20],
+      [x + w * 0.435, deckY + 5],
+      [x + w * 0.575, deckY + 32],
+      [x + w * 0.565, deckY + 45],
+      [x + w * 0.43, deckY + 18],
     ],
     DARKSTEEL,
   );
+  thickLine(x + w * 0.45, deckY + 12, x + w * 0.52, deckY + 26, 3, DARKSTEEL);
   // splash where it hit the water
-  fillEllipse(x + w * 0.47, seaY + 8, 20, 5, WHITEISH);
-  fillEllipse(x + w * 0.55, seaY + 12, 14, 4, WHITEISH);
+  fillEllipse(x + w * 0.47, seaY + 7, 20, 4.5, WHITEISH);
+  fillEllipse(x + w * 0.55, seaY + 11, 14, 3.6, WHITEISH);
   // blast at the broken end of the right deck, smoke above it
-  star(x + w * 0.6, deckY, 27, 11, 8, GOLD);
-  fillDisc(x + w * 0.6, deckY, 9, RED);
-  fillEllipse(x + w * 0.55, y + h * 0.3, 27, 13, SMOKE);
-  fillEllipse(x + w * 0.6, y + h * 0.18, 20, 10, SMOKE);
-  fillEllipse(x + w * 0.5, y + h * 0.4, 18, 9, SMOKE);
+  star(x + w * 0.6, deckY, 24, 10, 8, GOLD);
+  fillDisc(x + w * 0.6, deckY, 8, RED);
+  fillEllipse(x + w * 0.56, y + h * 0.3, 25, 11, SMOKE);
+  fillEllipse(x + w * 0.62, y + h * 0.17, 18, 9, SMOKE);
+  fillEllipse(x + w * 0.5, y + h * 0.4, 16, 8, SMOKE);
+  // a missile trail arcing down towards the gap
+  thickLine(x + w * 0.78, y + 4, x + w * 0.68, y + h * 0.24, 2.2, WHITEISH);
+  thickLine(x + w * 0.68, y + h * 0.24, x + w * 0.615, y + h * 0.44, 2.2, GOLD);
   // wave dashes on the water
   for (const [fx, fy] of [
-    [0.1, 0.8],
-    [0.26, 0.88],
-    [0.72, 0.84],
-    [0.88, 0.78],
-    [0.62, 0.92],
+    [0.08, 0.82],
+    [0.24, 0.9],
+    [0.72, 0.86],
+    [0.88, 0.8],
+    [0.62, 0.93],
   ] as Array<[number, number]>)
-    thickLine(x + w * fx, y + h * fy, x + w * fx + 22, y + h * fy, 2.4, WHITEISH);
+    thickLine(x + w * fx, y + h * fy, x + w * fx + 20, y + h * fy, 2.2, WHITEISH);
 }
 
-// An oil tanker in a strait (Strait of Hormuz panel).
-function drawTanker(cx: number, cy: number): void {
-  fillDisc(cx - 25, cy - 26, 9, GOLD); // low sun
+// A wide, low tanker in a strait, for the Hormuz column band.
+function drawTankerBand(x: number, y: number, w: number, h: number): void {
+  fillRect(x, y, w, h, SKY);
+  fillDisc(x + w * 0.88, y + h * 0.3, 9, GOLD); // low sun
+  fillRect(x, y + h * 0.62, w, h * 0.38, SEA); // water
+  // the strait's far shore, behind the ship
+  fillPoly(
+    [
+      [x, y + h * 0.62],
+      [x + w * 0.2, y + h * 0.4],
+      [x + w * 0.34, y + h * 0.62],
+    ],
+    SMOKE,
+  );
+  const cy = y + h * 0.52;
   // hull with a red waterline
   fillPoly(
     [
-      [cx - 35, cy + 6],
-      [cx + 35, cy + 6],
-      [cx + 26, cy + 21],
-      [cx - 26, cy + 21],
+      [x + w * 0.1, cy],
+      [x + w * 0.9, cy],
+      [x + w * 0.83, cy + 13],
+      [x + w * 0.17, cy + 13],
     ],
     INK,
   );
-  fillRect(cx - 29, cy + 16, 58, 5, RED);
-  fillRect(cx - 35, cy + 2, 70, 4, STEEL); // deck
+  fillRect(x + w * 0.14, cy + 9, w * 0.72, 4, RED);
+  fillRect(x + w * 0.1, cy - 4, w * 0.8, 4, STEEL); // deck
   // cargo blocks along the deck
-  fillRect(cx - 20, cy - 6, 13, 8, RED);
-  fillRect(cx - 5, cy - 6, 13, 8, NAVY);
-  fillRect(cx + 10, cy - 6, 11, 8, GOLD);
-  // bridge tower and funnel aft
-  fillRect(cx + 24, cy - 14, 9, 16, WHITEISH);
-  fillRect(cx - 31, cy - 11, 6, 13, INK);
-  // waves
-  thickLine(cx - 36, cy + 29, cx - 14, cy + 26, 2.4, NAVY);
-  thickLine(cx - 10, cy + 30, cx + 12, cy + 27, 2.4, NAVY);
-  thickLine(cx + 16, cy + 29, cx + 36, cy + 26, 2.4, NAVY);
+  fillRect(x + w * 0.2, cy - 13, w * 0.13, 9, RED);
+  fillRect(x + w * 0.36, cy - 13, w * 0.13, 9, NAVY);
+  fillRect(x + w * 0.52, cy - 13, w * 0.11, 9, GOLD);
+  // bridge tower aft, funnel forward
+  fillRect(x + w * 0.78, cy - 19, w * 0.07, 15, WHITEISH);
+  fillRect(x + w * 0.13, cy - 16, w * 0.045, 12, INK);
+  // a mine bobbing ahead of the bow, and the strait's far shore
+  fillDisc(x + w * 0.95, cy + 8, 5, INK);
+  thickLine(x + w * 0.95, cy + 3, x + w * 0.95, cy - 2, 1.8, INK);
 }
 
-// A jet airliner climbing (Trump's arrival in Manila panel).
-function drawPlane(cx: number, cy: number): void {
-  fillDisc(cx + 24, cy - 22, 10, GOLD); // sun
+// An AI chip for the Nvidia column band.
+function drawChipBand(x: number, y: number, w: number, h: number): void {
+  fillRect(x, y, w, h, NAVY);
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  // pins on all four sides
+  for (let i = -2; i <= 2; i++) {
+    fillRect(cx + i * 13 - 2, y + 3, 4, 8, GOLD);
+    fillRect(cx + i * 13 - 2, y + h - 11, 4, 8, GOLD);
+    fillRect(x + 3, cy + i * 8 - 1.6, 8, 3.2, GOLD);
+    fillRect(x + w - 11, cy + i * 8 - 1.6, 8, 3.2, GOLD);
+  }
+  // circuit traces running off the die
+  thickLine(x + 8, cy - 14, cx - 34, cy - 14, 1.8, STEEL);
+  thickLine(x + w - 8, cy + 12, cx + 34, cy + 12, 1.8, STEEL);
+  fillDisc(x + 8, cy - 14, 2.6, GOLD);
+  fillDisc(x + w - 8, cy + 12, 2.6, GOLD);
+  // the die
+  fillRect(cx - 30, cy - 17, 60, 34, INK);
+  fillRect(cx - 30, cy - 17, 60, 2.4, GOLD);
+  drawTextCentered('AI', cx, cy - 10, 19, WHITEISH, { weight: 3 });
+}
+
+// A jet airliner on finals over a runway, for the Manila column band.
+function drawPlaneBand(x: number, y: number, w: number, h: number): void {
+  fillRect(x, y, w, h, SKY);
+  fillEllipse(x + w * 0.16, y + h * 0.24, 30, 6, WHITEISH);
+  fillEllipse(x + w * 0.8, y + h * 0.18, 36, 6.5, WHITEISH);
+  fillRect(x, y + h * 0.8, w, h * 0.2, DARKSTEEL); // runway
+  for (let i = 0; i < 6; i++) fillRect(x + 14 + i * (w / 6), y + h * 0.885, 16, 2.4, WHITEISH);
+  const cx = x + w * 0.52;
+  const cy = y + h * 0.44;
   for (const [dx, dy] of [
-    [-38, -14],
-    [-42, 2],
-    [-38, 18],
+    [-46, -10],
+    [-50, 4],
   ] as Array<[number, number]>)
-    thickLine(cx + dx, cy + dy, cx + dx + 12, cy + dy, 2.2, FAINT); // speed lines
-  fillEllipse(cx, cy, 33, 7.5, NAVY); // fuselage
+    thickLine(cx + dx, cy + dy, cx + dx + 13, cy + dy, 2, FAINT); // speed lines
+  fillEllipse(cx, cy, 40, 8, NAVY); // fuselage
   fillPoly(
     [
       [cx - 4, cy + 3],
-      [cx - 18, cy + 20],
-      [cx + 3, cy + 20],
-      [cx + 8, cy + 3],
+      [cx - 20, cy + 19],
+      [cx + 4, cy + 19],
+      [cx + 9, cy + 3],
     ],
     NAVY,
   ); // near wing
   fillPoly(
     [
-      [cx - 27, cy - 3],
-      [cx - 35, cy - 16],
-      [cx - 24, cy - 16],
-      [cx - 17, cy - 3],
+      [cx - 31, cy - 3],
+      [cx - 40, cy - 17],
+      [cx - 28, cy - 17],
+      [cx - 20, cy - 3],
     ],
     NAVY,
   ); // tail fin
-  fillDisc(cx + 24, cy - 2, 2.6, SKY); // cockpit glass
-  thickLine(cx - 30, cy + 6, cx + 28, cy + 6, 1.8, SKY); // window line
-}
-
-// A parliament house (Knesset panel).
-function drawParliament(cx: number, cy: number): void {
-  thickLine(cx, cy - 26, cx, cy - 40, 2.4, INK); // flagpole
-  fillPoly(
-    [
-      [cx, cy - 40],
-      [cx + 13, cy - 36.5],
-      [cx, cy - 33],
-    ],
-    RED,
-  ); // flag
-  fillPoly(
-    [
-      [cx - 33, cy - 10],
-      [cx + 33, cy - 10],
-      [cx, cy - 27],
-    ],
-    INK,
-  ); // pediment
-  fillRect(cx - 33, cy - 9, 66, 5, INK); // entablature
-  for (const dx of [-27, -10, 7, 24]) fillRect(cx + dx, cy - 3, 5.5, 25, INK); // columns
-  fillRect(cx - 35, cy + 22, 70, 5, INK); // steps
-}
-
-// A robot head inside a ring (Geneva autonomous-weapons talks panel).
-function drawRobot(cx: number, cy: number): void {
-  strokeCircle(cx, cy, 41, 2.6, NAVY); // the ring of nations
-  thickLine(cx, cy - 15, cx, cy - 27, 3, NAVY); // antenna
-  fillDisc(cx, cy - 30, 4.2, RED);
-  fillRect(cx - 21, cy - 15, 42, 34, NAVY); // head
-  fillRect(cx - 26, cy - 6, 5, 14, NAVY); // ears
-  fillRect(cx + 21, cy - 6, 5, 14, NAVY);
-  fillDisc(cx - 9, cy - 2, 4.6, WHITEISH); // eyes
-  fillDisc(cx + 9, cy - 2, 4.6, WHITEISH);
-  for (const dx of [-9, 0, 9]) thickLine(cx + dx, cy + 8, cx + dx, cy + 14, 2.4, GOLD); // grille
-  fillRect(cx - 7, cy + 19, 14, 5, NAVY); // neck
+  fillDisc(cx + 29, cy - 2, 2.8, WHITEISH); // cockpit glass
+  thickLine(cx - 34, cy + 5.5, cx + 32, cy + 5.5, 1.8, SKY); // window line
+  fillDisc(cx - 12, cy + 13, 3.4, INK); // landing gear
+  fillDisc(cx + 16, cy + 13, 3.4, INK);
 }
 
 // ---------------------------------------------------------------------------
-// Composition: masthead, one lead story, four panels, a ticker, a footer.
+// Composition: a dense broadsheet front page.
 // ---------------------------------------------------------------------------
 
-function panel(
-  px: number,
-  py: number,
+const LX = 40; // left margin
+const RX = 984; // right margin
+const CW = RX - LX; // 944, content width
+
+// One of the three illustrated columns in the second row.
+function storyColumn(
+  x: number,
+  y: number,
+  w: number,
+  band: (bx: number, by: number, bw: number, bh: number) => void,
   kicker: string,
   head1: string,
   head2: string,
-  dek: string,
-  icon: (cx: number, cy: number) => void,
+  summary: string,
 ): void {
-  fillDisc(px + 52, py + 52, 47, MEDAL);
-  strokeCircle(px + 52, py + 52, 47, 2, INK);
-  icon(px + 52, py + 52);
-  const tx = px + 112;
-  drawTextFitLeft(kicker, tx, py + 0, 15.5, 344, RED, { weight: 2.6, tracking: 0.9 });
-  drawTextFitLeft(head1, tx, py + 25, 27, 344, INK, { weight: 3.6 });
-  drawTextFitLeft(head2, tx, py + 61, 27, 344, INK, { weight: 3.6 });
-  drawTextFitLeft(dek, tx, py + 104, 15.5, 344, INK, { weight: 2.1 });
+  band(x, y, w, 46);
+  fillRect(x, y, w, 1.6, INK);
+  fillRect(x, y + 44.4, w, 1.6, INK);
+  drawTextFitLeft(kicker, x, y + 56, 12.5, w, RED, { weight: 2.4, tracking: 0.6 });
+  drawTextFitLeft(head1, x, y + 76, 20.5, w, INK, { weight: 3.1 });
+  drawTextFitLeft(head2, x, y + 102, 20.5, w, INK, { weight: 3.1 });
+  drawParagraph(summary, x, y + 132, 11, w, 14, INK, { weight: 1.75 });
+}
+
+// One of the four text columns in the third row.
+function briefColumn(
+  x: number,
+  y: number,
+  w: number,
+  kicker: string,
+  head1: string,
+  head2: string,
+  summary: string,
+): void {
+  fillRect(x, y, w, 2.2, INK);
+  drawTextFitLeft(kicker, x, y + 10, 12, w, RED, { weight: 2.4, tracking: 0.6 });
+  drawTextFitLeft(head1, x, y + 30, 17.5, w, INK, { weight: 2.7 });
+  drawTextFitLeft(head2, x, y + 52, 17.5, w, INK, { weight: 2.7 });
+  drawParagraph(summary, x, y + 78, 10.5, w, 13, INK, { weight: 1.7 });
 }
 
 function compose(): void {
@@ -573,54 +675,202 @@ function compose(): void {
   fillRect(25, 25, 1.2, H - 50, INK);
   fillRect(W - 26.2, 25, 1.2, H - 50, INK);
 
-  // Masthead: the date is the biggest thing on the page.
-  rule(44, 980, 38, 2, INK);
-  drawTextCentered("THE WORLD IN ONE PICTURE", 512, 46, 19, INK, { weight: 2.6, tracking: 2.4 });
-  drawTextCentered("17 NOVEMBER 2026", 512, 86, 72, INK, { weight: 11 });
-  rule(44, 980, 168, 5, INK);
-  rule(44, 980, 178, 1.5, INK);
-  drawTextCentered("TUESDAY — THE WHOLE DAY, ON ONE PAGE", 512, 188, 16, FAINT, {
-    weight: 2.2,
-    tracking: 1.6,
+  // ---- Masthead ------------------------------------------------------------
+  rule(LX, RX, 40, 2, INK);
+  drawText('LATE EDITION', LX, 48, 12.5, INK, { weight: 2.2, tracking: 1.2 });
+  drawTextRight('SOURCES: REUTERS • AP • BBC • CNN • NYT • FORBES • CDC • OHCHR • UKMTO', RX, 48, 11.5, FAINT, {
+    weight: 2,
+    tracking: 1,
   });
+  drawTextFit('THE WORLD IN ONE PICTURE', 512, 70, 55, 936, INK, { weight: 8, tracking: 0.4 });
+  rule(LX, RX, 140, 5, INK);
+  rule(LX, RX, 149, 1.5, INK);
+  drawText('TUESDAY', LX, 158, 15, INK, { weight: 2.6, tracking: 1.4 });
+  drawTextCentered('17 NOVEMBER 2026', 512, 156, 17.5, INK, { weight: 3.2, tracking: 1.6 });
+  drawTextRight('ONE PAGE — THE WHOLE DAY', RX, 158, 15, INK, { weight: 2.6, tracking: 1.4 });
 
-  // Lead story: Ukraine brings down a span of the Crimea bridge.
-  drawText("EUROPE • THE WAR IN UKRAINE", 44, 220, 21, RED, { weight: 3.4, tracking: 1 });
-  drawText("UKRAINE BRINGS DOWN", 44, 250, 52, INK, { weight: 7 });
-  drawText("CRIMEA BRIDGE SPAN", 44, 316, 52, INK, { weight: 7 });
-  drawBridgeScene(44, 384, 936, 108);
-  drawTextFit(
-    "ZELENSKYY HAILS AN 'UNPRECEDENTED OPERATION' — RUSSIA ANSWERS ON KYIV'S BRIDGES",
-    512,
-    504,
-    18,
-    930,
+  // ---- Weather strip -------------------------------------------------------
+  fillRect(LX, 182, CW, 27, MEDAL);
+  rule(LX, RX, 182, 1.6, INK);
+  rule(LX, RX, 209, 1.6, INK);
+  drawText('WEATHER', LX + 10, 189, 13.5, RED, { weight: 2.6, tracking: 1 });
+  drawTextFitLeft(
+    'CYCLONE AKVAN STALLS OVER THE BAY OF BENGAL — ANDHRA PRADESH LANDFALL DUE FRIDAY • COP31 TALKS RUN ON IN ANTALYA',
+    LX + 108,
+    189.5,
+    13,
+    CW - 122,
     INK,
-    { weight: 2.5 },
+    { weight: 2.1 },
   );
-  rule(44, 980, 542, 2.5, INK);
 
-  // Four panels: Middle East, Asia, Israel, Geneva.
-  panel(44, 558, "MIDDLE EAST • STRAIT OF HORMUZ", "TANKERS HIT MINES", "IN HORMUZ, IRAN SAYS", "THIRD US CARRIER IN THE GULF", drawTanker);
-  panel(524, 558, "ASIA • ASEAN SUMMIT, MANILA", "TRUMP IN MANILA", "FOR ASEAN SUMMIT", "SIGNS THAI TRADE STATEMENT", drawPlane);
-  panel(44, 724, "ISRAEL • THE KNESSET", "NETANYAHU ALLY OUSTED", "AS KNESSET SPEAKER", "EISENKOT BLOC WINS 66-52", drawParliament);
-  panel(524, 724, "GENEVA • UNITED NATIONS", "'KILLER ROBOT' TALKS", "OPEN IN GENEVA", "128 NATIONS WEIGH A BAN", drawRobot);
-  fillRect(511, 558, 1.6, 310, FAINT); // column divider
-  rule(44, 980, 711, 1.6, FAINT); // row divider
+  // ---- Lead story ----------------------------------------------------------
+  drawText('EUROPE — THE WAR IN UKRAINE', LX, 222, 16.5, RED, { weight: 3, tracking: 1 });
+  drawTextRight('THE LEAD STORY', RX, 222, 13, FAINT, { weight: 2.2, tracking: 1.2 });
+  drawText('UKRAINE BRINGS DOWN', LX, 244, 54, INK, { weight: 7.5 });
+  drawText('CRIMEA BRIDGE SPAN', LX, 306, 54, INK, { weight: 7.5 });
+  drawTextFitLeft(
+    "ZELENSKYY HAILS A SEVEN-STAGE 'UNPRECEDENTED OPERATION' — MOSCOW VOWS TO REBUILD IT 'BETTER THAN BEFORE'",
+    LX,
+    366,
+    15.5,
+    CW,
+    INK,
+    { weight: 2.4 },
+  );
+  rule(LX, RX, 388, 2.2, INK);
+  // summary column, left
+  drawParagraph(
+    "KYIV — UKRAINE SAYS THE OPERATION, WEEKS IN THE MAKING, DESTROYED A METAL ARCH AND THE ROAD SPAN BENEATH IT. RUSSIA HALTED ALL TRAFFIC AND STRUCK BACK AT KYIV'S OWN BRIDGES.",
+    LX,
+    398,
+    12.5,
+    288,
+    17,
+    INK,
+    { weight: 1.9 },
+  );
+  drawTextFitLeft("THE CROSSING IS 19 KM LONG — EUROPE'S LONGEST", LX, 518, 11.5, 300, RED, {
+    weight: 2,
+  });
+  drawTextFitLeft('EVERY PICTURE ON THIS PAGE IS DRAWN IN CODE', LX, 534, 10, 300, FAINT, {
+    weight: 1.8,
+  });
+  // scene, right, with a photo-style caption
+  drawBridgeScene(352, 398, 632, 106);
+  fillRect(352, 398, 632, 1.6, INK);
+  fillRect(352, 502.4, 632, 1.6, INK);
+  drawTextFitLeft(
+    'STAFF ILLUSTRATION, AFTER SBU IMAGERY — THE FALLEN ROAD ARCH IN THE KERCH STRAIT; THE RAIL SPAN STANDS, ITS ARCH DAMAGED',
+    352,
+    512,
+    11,
+    632,
+    FAINT,
+    { weight: 1.8 },
+  );
+  rule(LX, RX, 546, 2.6, INK);
 
-  // Ticker: the rest of the day in two lines.
-  fillRect(44, 884, 936, 62, INK);
-  drawTextCentered("ALSO TODAY — NVIDIA'S FIRST EARNINGS SINCE HUANG EXIT", 512, 893, 16.5, PAPER, {
-    weight: 2.4,
-  });
-  drawTextCentered("JAPAN JETS SCRAMBLE • COP31 ANTALYA • MEASLES HIGHEST SINCE 1991", 512, 920, 16.5, PAPER, {
-    weight: 2.4,
-  });
+  // ---- Second row: three illustrated stories --------------------------------
+  storyColumn(
+    LX,
+    556,
+    301,
+    drawTankerBand,
+    'MIDDLE EAST — STRAIT OF HORMUZ',
+    'FOURTH TANKER HITS',
+    'A MINE IN HORMUZ',
+    "IRAN'S NAVY SAYS A FOURTH TANKER HAS CAUGHT FIRE ON A NAVAL MINE. UKMTO REPORTS A PROJECTILE HIT OFF OMAN.",
+  );
+  storyColumn(
+    361,
+    556,
+    301,
+    drawChipBand,
+    'BUSINESS — SILICON VALLEY',
+    'NVIDIA BEATS BIG IN',
+    'POST-HUANG REPORT',
+    'FIRST EARNINGS SINCE JENSEN HUANG QUIT: REVENUE $115.8BN BEAT THE $109.1BN FORECAST. BOARD WILL NOT REINSTATE HIM.',
+  );
+  storyColumn(
+    682,
+    556,
+    302,
+    drawPlaneBand,
+    'ASIA — ASEAN SUMMIT, MANILA',
+    'TRUMP LANDS IN MANILA',
+    'FOR ASEAN-US SUMMIT',
+    'AIR FORCE ONE TOUCHED DOWN AT 5.33PM FOR THE ASEAN-US SPECIAL SUMMIT AND THE FIRST QUAD MEETING IN TWO YEARS.',
+  );
+  fillRect(344.5, 556, 1.4, 184, FAINT);
+  fillRect(665.5, 556, 1.4, 184, FAINT);
 
-  drawTextCentered("TUESDAY 17 NOVEMBER 2026 — THE DAY AS REPORTED AROUND THE WORLD", 512, 962, 15, FAINT, {
-    weight: 2.1,
-    tracking: 1.2,
+  // ---- Markets box -----------------------------------------------------------
+  fillRect(LX, 748, CW, 62, INK);
+  drawText('MARKETS', LX + 14, 757, 13.5, GOLD, { weight: 2.8, tracking: 1.2 });
+  drawTextFitLeft("TUESDAY'S CLOSE — WALL ST FALLS FOR A FOURTH DAY", LX + 122, 757, 13, PAPER, {
+    weight: 2.3,
   });
+  drawTextRight('NVIDIA BEAT AFTER THE BELL', RX - 14, 758, 11.5, BANDTXT, { weight: 2 });
+  const cells: Array<[string, string, string, RGB]> = [
+    ['S&P 500', '7,340.53', '-1.03%', DOWN],
+    ['DOW JONES', '50,759.42', '-1.64%', DOWN],
+    ['NASDAQ', '24,328.38', '-0.74%', DOWN],
+    ['BRENT OIL', '$93.14', '+0.76%', UP],
+    ['WTI OIL', '$86.01', '+0.34%', UP],
+    ['GOLD', '$3,864.20', '+0.29%', UP],
+  ];
+  const cellW = CW / 6;
+  for (let i = 0; i < cells.length; i++) {
+    const cx0 = LX + i * cellW + 14;
+    drawText(cells[i][0], cx0, 779, 10.5, BANDTXT, { weight: 1.9, tracking: 0.6 });
+    const nw = textWidth(cells[i][0], 10.5, 0.6);
+    drawText(cells[i][2], cx0 + nw + 9, 779, 10.5, cells[i][3], { weight: 2.1 });
+    drawText(cells[i][1], cx0, 791, 15.5, PAPER, { weight: 2.8 });
+    if (i > 0) fillRect(LX + i * cellW, 776, 1, 28, STEEL);
+  }
+
+  // ---- Third row: four brief columns -----------------------------------------
+  briefColumn(
+    LX,
+    822,
+    224,
+    'ISRAEL — THE KNESSET',
+    'NETANYAHU ALLY OHANA',
+    'OUSTED AS SPEAKER',
+    "MATAN KAHANA, OF EISENKOT'S BLOC, WINS THE CHAIR 66-52 WITH ARAB PARTIES' VOTES.",
+  );
+  briefColumn(
+    280,
+    822,
+    224,
+    'GENEVA — UNITED NATIONS',
+    "'KILLER ROBOT' TALKS",
+    'OPEN IN GENEVA',
+    'DELEGATES WEIGH A TREATY BANNING LETHAL AUTONOMOUS WEAPONS. THE US, RUSSIA AND ISRAEL OPPOSE BINDING RULES.',
+  );
+  briefColumn(
+    520,
+    822,
+    224,
+    'UNITED STATES — HEALTH',
+    'MEASLES AT HIGHEST',
+    'SINCE 1991',
+    '5,412 US CASES THIS YEAR, AND 13 BABIES BORN WITH MEASLES — A FIRST IN DECADES, CDC FIGURES SHOW.',
+  );
+  briefColumn(
+    760,
+    822,
+    224,
+    'SPORT — TENNIS AND NBA',
+    'ANDREEVA TAKES WTA',
+    'FINALS ON DEBUT',
+    'SHE BEAT SVITOLINA 7-5 6-3. ALCARAZ AND MEDVEDEV WON IN TURIN; MITCHELL HIT 39 FOR THE CAVS.',
+  );
+  fillRect(264, 822, 1.4, 124, FAINT);
+  fillRect(504, 822, 1.4, 124, FAINT);
+  fillRect(744, 822, 1.4, 124, FAINT);
+
+  // ---- Bottom ticker -----------------------------------------------------------
+  fillRect(LX, 956, CW, 40, INK);
+  drawTextFit(
+    'MIDDLE EAST — IRANIAN DRONES TARGET A US RADAR IN BAHRAIN, INTERCEPTED • UK, AUSTRALIA, CANADA AND ITALY URGE ISRAEL TO OPEN GAZA CROSSINGS',
+    512,
+    963,
+    13,
+    920,
+    PAPER,
+    { weight: 2.2 },
+  );
+  drawTextFit(
+    "ALSO TODAY — SUDAN: UN FINDS 1,390 CIVILIANS KILLED • FIVE EU STATES UNVEIL A RWANDA RETURN HUB • JAPAN SCRAMBLES JETS • YEMEN'S GOVERNMENT FALLS BACK ON ADEN",
+    512,
+    981,
+    13,
+    920,
+    PAPER,
+    { weight: 2.2 },
+  );
 }
 
 function main(): void {
